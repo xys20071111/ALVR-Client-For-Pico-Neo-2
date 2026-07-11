@@ -1,5 +1,7 @@
 # PicoStreamer — ALVR Client for Pico Neo 2
 
+由GLM-5.2参考ALVR和PhoneVR的源代码编写的给Pico Neo 2使用的串流客户端
+
 ## 项目用途
 
 PicoStreamer 是一个基于 [ALVR](https://github.com/alvr-org/ALVR) 的 VR 串流客户端，运行在 **Pico Neo 2** 头显上。它将 PC 上 SteamVR 渲染的 VR 画面通过网络传输到头显显示，同时将头显和手柄的追踪数据（6DoF 位置 + 旋转）回传给 PC 端的 SteamVR。
@@ -82,16 +84,6 @@ JAVA_HOME=/path/to/jdk-17 ./gradlew :app:assembleDebug --no-daemon
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### NDK 路径配置
-
-NDK 路径通过环境变量 `ANDROID_NDK_HOME` 传入。构建前确保已设置：
-
-```bash
-export ANDROID_NDK_HOME=/path/to/your/ndk
-```
-
-如果未设置，cargo 会使用自身的 NDK 发现机制。
-
 ## 关键配置参数
 
 所有核心参数在 `app/src/main/cpp/alvr_pico_main.cpp` 开头定义：
@@ -119,28 +111,8 @@ ALVR 的 `AlvrFov` 字段是**弧度制角度**（非正切值），服务端内
 
 ## 已知问题
 
-### 6DoF 位置追踪可能未生效
+- Home键会直接返回启动器
+- 画面设置怎么调都很糊
+- 导致SteamVR重启，重启后手柄消失
+- FOV奇怪
 
-- **症状**：晃动头显时 SteamVR 界面跟随移动，而非固定在空间中
-- **原因**：`PvrClient.setTrackingMode(1)` 虽然被调用，但 `HmdState.getPos()` 可能仍返回零值。`PvrClient.getTrackingData()` 是空方法（返回 null），`getTrackingDataExt()` 通过 `PvrServiceManager.mManager` 查询真实数据但 mManager 可能为 null（SteamVR 重启后会导致 NPE 崩溃）
-- **当前状态**：已移除 `getTrackingDataExt()` 调用避免崩溃，依赖 `setTrackingMode(1)` + `HmdState.getPos()`，但效果未确认
-
-### 手柄可能在 SteamVR 重启后消失
-
-- **原因**：PicoVR SDK 的 `PvrServiceManager.mManager` 在 PVR 服务断开后变为 null，导致后续追踪数据查询 NPE
-- **当前状态**：已移除会触发 NPE 的代码路径，但 SteamVR 重启后手柄可能需要重新配对
-
-### FOV 需要手动校准
-
-- 当前使用 55° 半角（总 110°）作为默认值，但最适宜的 FOV 值需要根据实际佩戴体验调整
-- 值不匹配时表现为画面"太近"（FOV 偏小）或"太远"（FOV 偏大）
-
-### 编码分辨率与眼缓冲区
-
-- ALVR 编码分辨率 1856×1856（正方形）
-- PicoVR SDK 眼缓冲区 1664×1664（正方形）
-- 两者宽高比均为 1:1，匹配正确，但分辨率差异由 GPU 线性过滤处理
-
-### NDK 路径配置
-
-NDK 路径通过环境变量 `ANDROID_NDK_HOME` 自动读取，确保构建前已设置。
