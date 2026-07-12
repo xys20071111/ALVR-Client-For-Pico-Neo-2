@@ -199,7 +199,7 @@ static const char *VS =
     " vTC=p; gl_Position=vec4(p*2.0-1.0,0.0,1.0);\n}\n";
 static const char *FS =
     "#version 300 es\n#extension GL_OES_EGL_image_external_essl3:enable\n"
-    "precision mediump float;\n"
+    "precision highp float;\n"
     "in vec2 vTC;\nuniform samplerExternalOES uTex;\nuniform float uEyeOffset;\nout vec4 o;\n"
     "void main(){vec2 uv=vec2(vTC.x*0.5+uEyeOffset,1.0-vTC.y); o=texture(uTex,uv);}\n";
 
@@ -261,6 +261,13 @@ static void assocHWB(void* hwbuf, GLuint tex[2]) {
         if (!img) { LOGE("eglCreateImageKHR fail eye=%d err=0x%x", i, eglGetError()); continue; }
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex[i]);
         g_glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img);
+        // Re-apply texture parameters after EGLImage association.
+        // Some GPU drivers reset filtering to GL_NEAREST after glEGLImageTargetTexture2DOES,
+        // causing blocky/mosaic-like rendering.
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         g_eglDestroyImageKHR(dpy, img);
     }
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
@@ -600,7 +607,10 @@ Java_top_playtbsxys_picostreamer_PicoALVRActivity_initializeNative(JNIEnv *env, 
     caps.default_view_height = 1920;
     caps.refresh_rates = rr;
     caps.refresh_rates_count = 1;
-    caps.foveated_encoding = true;
+    // Foveated encoding (FFR) disabled: our blit shader does not implement FFR unpacking.
+    // The ALVR OpenXR client uses a StagingRenderer with a complex shader to unpack
+    // FFR-compressed frames. Without it, edges look blocky/mosaic-like.
+    caps.foveated_encoding = false;
     caps.encoder_high_profile = true;
     caps.prefer_full_range = true;
     caps.preferred_encoding_gamma = 1.0f;
