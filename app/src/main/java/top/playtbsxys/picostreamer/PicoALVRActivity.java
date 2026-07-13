@@ -1,5 +1,6 @@
 package top.playtbsxys.picostreamer;
 
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -102,7 +103,17 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
         mControllerManager = new CVControllerManager(getApplicationContext());
         mControllerManager.setListener(mControllerListener);
         mPvrClient = new PvrClient(this);  // PvrClient requires Activity context, not Application
+
+        // Load user-configured stream settings (FOV half-angle in degrees, standing height in meters)
+        SharedPreferences prefs = getSharedPreferences("stream_settings", MODE_PRIVATE);
+        float fovH = prefs.getFloat("fov_h", 55.0f);
+        float fovV = prefs.getFloat("fov_v", 55.0f);
+        float height = prefs.getFloat("standing_height", 1.5f);
+        Log.i(TAG, "Stream config from prefs: fovH=" + fovH + " fovV=" + fovV + " height=" + height);
+        setStreamConfigNative(fovH, fovV, height);
+
         initializeNative();
+        mPvrClient.startVRMode();
     }
 
     @Override
@@ -270,6 +281,7 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
 
     // ===== Native methods =====
 
+    private native void setStreamConfigNative(float fovH, float fovV, float height);
     private native void initializeNative();
     private native void resumeNative();
     private native void pauseNative();

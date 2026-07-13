@@ -25,11 +25,15 @@
 // Pico Neo 2: 101° diagonal FOV. Using square eye buffer (1664×1664, 1:1 aspect).
 // Equal h/v half-angles for square buffer. Increased from theoretical 40.6° to 45°
 // to reduce "zoomed in" effect and better fill the headset's actual optical FOV.
-#define FOV_V_HALF_DEG 55.0f
-#define FOV_H_HALF_DEG 55.0f
+// Pico Neo 2: 101° diagonal FOV. Using square eye buffer (1664×1664, 1:1 aspect).
+// Equal h/v half-angles for square buffer. Increased from theoretical 40.6° to 45°
+// to reduce "zoomed in" effect and better fill the headset's actual optical FOV.
+// These are mutable globals so they can be set from Java settings UI at runtime.
+static float g_fovVHalfDeg = 55.0f;
+static float g_fovHHalfDeg = 55.0f;
 // PicoVR SDK tracking origin is at the initial head position (Y≈0).
 // SteamVR/ALVR expects floor-relative coordinates. Add standing height offset.
-#define STANDING_HEIGHT 1.5f
+static float g_standingHeight = 1.5f;
 
 #ifndef GL_TEXTURE_EXTERNAL_OES
 #define GL_TEXTURE_EXTERNAL_OES 0x8D65
@@ -345,8 +349,8 @@ static void sendViewParams() {
     // ALVR server does tan(fov.left) internally to build projection matrix.
     // See: alvr/common/src/primitives.rs: "Field of view in radians"
     // See: alvr/graphics/src/lib.rs: projection_from_fov() does tan(fov.left)
-    float h_half_rad = FOV_H_HALF_DEG * (PI_F / 180.0f);
-    float v_half_rad = FOV_V_HALF_DEG * (PI_F / 180.0f);
+    float h_half_rad = g_fovHHalfDeg * (PI_F / 180.0f);
+    float v_half_rad = g_fovVHalfDeg * (PI_F / 180.0f);
     AlvrViewParams vp[2] = {};
     vp[0].pose.orientation = {0,0,0,1}; vp[0].pose.position[0] = -IPD_HALF;
     vp[0].fov = {-h_half_rad, h_half_rad, v_half_rad, -v_half_rad};
@@ -354,7 +358,7 @@ static void sendViewParams() {
     vp[1].fov = {-h_half_rad, h_half_rad, v_half_rad, -v_half_rad};
     alvr_send_view_params(vp);
     LOGI("View params sent: hFov=%.1f vFov=%.1f rad(h=%.3f v=%.3f)",
-         FOV_H_HALF_DEG*2, FOV_V_HALF_DEG*2, h_half_rad, v_half_rad);
+         g_fovHHalfDeg*2, g_fovVHalfDeg*2, h_half_rad, v_half_rad);
 }
 
 // Send tracking from shared data (called on ALVR thread)
@@ -388,20 +392,20 @@ static void sendTracking() {
     AlvrDeviceMotion hm = {};
     hm.device_id = HEAD_ID;
     hm.pose.orientation = t.hmdOri;  // Raw orientation, no inverse
-    hm.pose.position[0] = t.hmdPos[0]; hm.pose.position[1] = t.hmdPos[1] + STANDING_HEIGHT; hm.pose.position[2] = t.hmdPos[2];
+    hm.pose.position[0] = t.hmdPos[0]; hm.pose.position[1] = t.hmdPos[1] + g_standingHeight; hm.pose.position[2] = t.hmdPos[2];
     motions.push_back(hm);
     if (t.leftConn) {
         AlvrDeviceMotion m = {};
         m.device_id = LEFT_HAND_ID;
         m.pose.orientation = fixControllerOri({t.leftOri[0],t.leftOri[1],t.leftOri[2],t.leftOri[3]});
-        m.pose.position[0]=t.leftPos[0]; m.pose.position[1]=t.leftPos[1] + STANDING_HEIGHT; m.pose.position[2]=t.leftPos[2];
+        m.pose.position[0]=t.leftPos[0]; m.pose.position[1]=t.leftPos[1] + g_standingHeight; m.pose.position[2]=t.leftPos[2];
         motions.push_back(m);
     }
     if (t.rightConn) {
         AlvrDeviceMotion m = {};
         m.device_id = RIGHT_HAND_ID;
         m.pose.orientation = fixControllerOri({t.rightOri[0],t.rightOri[1],t.rightOri[2],t.rightOri[3]});
-        m.pose.position[0]=t.rightPos[0]; m.pose.position[1]=t.rightPos[1] + STANDING_HEIGHT; m.pose.position[2]=t.rightPos[2];
+        m.pose.position[0]=t.rightPos[0]; m.pose.position[1]=t.rightPos[1] + g_standingHeight; m.pose.position[2]=t.rightPos[2];
         motions.push_back(m);
     }
     alvr_send_tracking(now, motions.data(), motions.size(), nullptr, nullptr);
@@ -592,6 +596,16 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
 
 static JavaVM* g_javaVm = nullptr;
 static jobject g_javaCtx = nullptr;
+
+extern "C" JNIEXPORT void JNICALL
+Java_top_playtbsxys_picostreamer_PicoALVRActivity_setStreamConfigNative(
+    JNIEnv *env, jobject obj, jfloat fovH, jfloat fovV, jfloat height
+) {
+    LOGI("setStreamConfigNative: fovH=%.1f fovV=%.1f height=%.2f", fovH, fovV, height);
+    g_fovHHalfDeg = fovH;
+    g_fovVHalfDeg = fovV;
+    g_standingHeight = height;
+}
 
 extern "C" JNIEXPORT void JNICALL
 Java_top_playtbsxys_picostreamer_PicoALVRActivity_initializeNative(JNIEnv *env, jobject obj) {

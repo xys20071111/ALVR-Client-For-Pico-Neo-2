@@ -21,18 +21,39 @@
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
         android:largeHeap="true">
 
-        <meta-data android:name="pvr.app.type" android:value="vr" />
-        <meta-data android:name="pvr.app.orientation" android:value="180" />
-
         <activity
-            android:name=".PicoALVRActivity"
+            android:name=".SettingsActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:launchMode="singleInstance"
             android:screenOrientation="landscape">
+            <meta-data
+                android:name="pico.vr.position"
+                android:value="far"/>
+            <meta-data
+                android:name="pico.vr.theme"
+                android:value="NoCaptionBar"/>
+            <meta-data
+                android:name="pvr.vrshell.mode"
+                android:value="1"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".PicoALVRActivity"
+            android:exported="true"
+            android:process=":streaming"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation"
+            android:screenOrientation="landscape">
+            <meta-data android:name="pvr.app.type" android:value="vr" />
+            <meta-data android:name="pvr.app.orientation" android:value="180" />
+            <meta-data
+                android:name="pico.vr.theme"
+                android:value="NoCaptionBar"/>
         </activity>
     </application>
 

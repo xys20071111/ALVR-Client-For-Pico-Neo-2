@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">PicoALVR</string>
+    <string name="settings_title">PicoALVR 串流设置</string>
+    <string name="settings_fov_label">视野角度 (FOV)</string>
+    <string name="settings_height_label">站立身高</string>
+    <string name="settings_save">保存并开始串流</string>
+    <string name="settings_reset">恢复默认</string>
+    <string name="settings_hint">调整后点击“保存”进入串流，设置将在下次启动时记住</string>
 </resources>
