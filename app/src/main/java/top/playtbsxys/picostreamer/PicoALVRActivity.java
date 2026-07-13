@@ -14,6 +14,7 @@ import com.picovr.cvclient.CVControllerManager;
 import com.picovr.cvclient.CVController;
 import com.picovr.cvclient.CVControllerListener;
 import com.picovr.cvclient.ButtonNum;
+import com.picovr.picovrlib.cvcontrollerclient.ControllerClient;
 import com.psmart.vrlib.PvrClient;
 
 public class PicoALVRActivity extends VRActivity implements RenderInterface {
@@ -22,6 +23,12 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
 
     // PvrClient for direct 6DoF tracking data access (HmdState.getPos() may return zeros)
     private PvrClient mPvrClient;
+
+    // Frame counter for periodic diagnostic logging
+    private int mFrameCount = 0;
+    // Previous button state for change detection
+    private boolean[] mPrevLeftBtns = new boolean[6];
+    private boolean[] mPrevRightBtns = new boolean[6];
 
     static {
         System.loadLibrary("pico_alvr");
@@ -209,6 +216,32 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
             leftButtons[4] = mLeftController.getButtonState(ButtonNum.buttonBY);
             leftButtons[5] = mLeftController.getButtonState(ButtonNum.buttonLG);
             leftBattery = mLeftController.getBatteryLevel();
+
+            // Pico Neo 2 workaround: standard getButtonState() doesn't reliably report
+            // grip/A/X/B/Y. Read directly from CV2 key event API for reliable data.
+            int lSerial = mLeftController.getSerialNum();
+            int[] lCv2Keys = ControllerClient.getCV2ControllerKeyEvent(lSerial);
+            if (lCv2Keys != null && lCv2Keys.length >= 4) {
+                leftButtons[3] = lCv2Keys[0] == 1; // buttonAX
+                leftButtons[4] = lCv2Keys[1] == 1; // buttonBY
+                leftButtons[5] = lCv2Keys[2] == 1; // grip (buttonLG)
+            }
+            // Fallback: if CV2 API reports no grip, try standard API
+            if (!leftButtons[5]) {
+                leftButtons[5] = mLeftController.getButtonState(ButtonNum.buttonLG);
+            }
+
+            // Temporary diagnostic: log all CV2 key data on any left button change
+            boolean lChanged = false;
+            for (int i = 0; i < 6; i++) { if (leftButtons[i] != mPrevLeftBtns[i]) { lChanged = true; mPrevLeftBtns[i] = leftButtons[i]; } }
+            // Also log periodically to capture grip press even if standard API misses it
+            if (lChanged || mFrameCount % 600 == 1) {
+                int[] lStdKeys = ControllerClient.getControllerKeyEvent(lSerial);
+                Log.i(TAG, "L diag: cv2=" + java.util.Arrays.toString(lCv2Keys)
+                    + " std=" + java.util.Arrays.toString(lStdKeys)
+                    + " grip_std=" + mLeftController.getButtonState(ButtonNum.buttonLG)
+                    + " trig=" + leftTrigger);
+            }
         }
 
         if (mRightController != null && mRightController.getConnectState() == 1) {
@@ -225,6 +258,27 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
             rightButtons[4] = mRightController.getButtonState(ButtonNum.buttonBY);
             rightButtons[5] = mRightController.getButtonState(ButtonNum.buttonRG);
             rightBattery = mRightController.getBatteryLevel();
+
+            // Pico Neo 2 workaround: standard getButtonState() doesn't reliably report
+            // grip/A/X/B/Y. Read directly from CV2 key event API for reliable data.
+            int rSerial = mRightController.getSerialNum();
+            int[] rCv2Keys = ControllerClient.getCV2ControllerKeyEvent(rSerial);
+            if (rCv2Keys != null && rCv2Keys.length >= 4) {
+                rightButtons[3] = rCv2Keys[0] == 1; // buttonAX
+                rightButtons[4] = rCv2Keys[1] == 1; // buttonBY
+                rightButtons[5] = rCv2Keys[2] == 1; // grip (buttonRG)
+            }
+
+            // Diagnostic: log on button state change only
+            boolean rChanged = false;
+            for (int i = 0; i < 6; i++) { if (rightButtons[i] != mPrevRightBtns[i]) { rChanged = true; mPrevRightBtns[i] = rightButtons[i]; } }
+            if (rChanged) {
+                Log.i(TAG, "R btns: click=" + rightButtons[2]
+                    + " ax=" + rightButtons[3] + " by=" + rightButtons[4]
+                    + " grip=" + rightButtons[5] + " trig=" + rightTrigger
+                    + " cv2=" + java.util.Arrays.toString(rCv2Keys));
+            }
+            mFrameCount++;
         }
 
         onFrameBeginNative(
