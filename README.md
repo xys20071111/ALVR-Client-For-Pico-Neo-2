@@ -86,6 +86,16 @@ JAVA_HOME=/path/to/jdk-17 ./gradlew :app:assembleDebug --no-daemon
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## USB 有线串流
+
+有线串流复用 ALVR v20 的 ADB 端口转发，不需要在客户端强制切换成 TCP：在启动前的设置界面勾选 **USB 有线串流** 后，ALVR 检测到 ADB 有线客户端会自动转发控制和视频端口，并使用 TCP 传输。未勾选时，客户端沿用 Wi-Fi 网络发现和传输流程。
+
+1. 使用支持数据传输的 USB 线连接头显与运行 ALVR Server 的电脑，并在头显上允许 USB 调试及该电脑的 ADB 授权。
+2. 在 ALVR Server 的连接设置中，将 **Wired client type** 设为 **Custom**，包名填写 `top.playtbsxys.picostreamer`。可按需开启自动启动客户端。
+3. 在 PicoStreamer 设置界面勾选 **USB 有线串流**，保存并进入 VR，然后从 ALVR Server 建立连接；使用 Wi-Fi 时取消勾选。
+
+有线模式使用应用默认进程名并关闭客户端的 Wi-Fi 发现广播，以便 ALVR 的 ADB 集成只建立 USB 连接；无线模式使用独立串流进程。若有线连接没有建立，检查电脑上的 `adb devices` 是否显示已授权的头显，以及 ALVR Server 的 Wired client type 是否填写了上述包名。
+
 ## 关键配置参数
 
 所有核心参数在 `app/src/main/cpp/alvr_pico_main.cpp` 开头定义：
@@ -116,4 +126,3 @@ ALVR 的 `AlvrFov` 字段是**弧度制角度**（非正切值），服务端内
 - Home键会直接返回启动器
 - 导致SteamVR重启，重启后手柄消失
 - FOV奇怪
-

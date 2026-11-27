@@ -24,6 +24,7 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
+            android:process=":settings"
             android:theme="@android:style/Theme.Material.NoActionBar"
             android:launchMode="singleInstance"
             android:screenOrientation="landscape">
@@ -46,6 +47,19 @@
             android:name=".PicoALVRActivity"
             android:exported="true"
             android:process=":streaming"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation"
+            android:screenOrientation="landscape">
+            <meta-data android:name="pvr.app.type" android:value="vr" />
+            <meta-data android:name="pvr.app.orientation" android:value="180" />
+            <meta-data
+                android:name="pico.vr.theme"
+                android:value="NoCaptionBar"/>
+        </activity>
+
+        <activity
+            android:name=".PicoALVRWiredActivity"
+            android:exported="true"
             android:excludeFromRecents="true"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation"
             android:screenOrientation="landscape">

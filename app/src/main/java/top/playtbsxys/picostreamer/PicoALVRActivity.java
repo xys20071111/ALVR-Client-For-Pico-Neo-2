@@ -147,7 +147,9 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
         Log.i(TAG, "Stream config from prefs: fovH=" + fovH + " fovV=" + fovV + " height=" + height);
         setStreamConfigNative(fovH, fovV, height);
 
-        initializeNative();
+        boolean wiredStreaming = getIntent().getBooleanExtra(
+            "wired_streaming", prefs.getBoolean("wired_streaming", false));
+        initializeNative(wiredStreaming);
         mPvrClient.startVRMode();
     }
 
@@ -342,7 +344,7 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
     // ===== Native methods =====
 
     private native void setStreamConfigNative(float fovH, float fovV, float height);
-    private native void initializeNative();
+    private native void initializeNative(boolean wiredStreaming);
     private native void resumeNative();
     private native void pauseNative();
     private native void destroyNative();

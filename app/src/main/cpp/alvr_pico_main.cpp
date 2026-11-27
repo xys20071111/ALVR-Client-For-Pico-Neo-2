@@ -766,8 +766,10 @@ Java_top_playtbsxys_picostreamer_PicoALVRActivity_setStreamConfigNative(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_top_playtbsxys_picostreamer_PicoALVRActivity_initializeNative(JNIEnv *env, jobject obj) {
-    LOGI("initializeNative");
+Java_top_playtbsxys_picostreamer_PicoALVRActivity_initializeNative(
+    JNIEnv *env, jobject obj, jboolean wiredStreaming
+) {
+    LOGI("initializeNative: wiredStreaming=%d", (int)wiredStreaming);
     env->GetJavaVM(&g_javaVm);
     g_javaCtx = env->NewGlobalRef(obj);
     alvr_initialize_android_context((void*)g_javaVm, (void*)g_javaCtx);
@@ -784,6 +786,7 @@ Java_top_playtbsxys_picostreamer_PicoALVRActivity_initializeNative(JNIEnv *env, 
     caps.encoder_high_profile = true;
     caps.prefer_full_range = true;
     caps.preferred_encoding_gamma = 1.0f;
+    caps.wired = wiredStreaming;
     alvr_initialize(caps);
     initPathIds();
     LOGI("ALVR initialized");

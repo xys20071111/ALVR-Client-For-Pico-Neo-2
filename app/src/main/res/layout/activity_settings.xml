@@ -73,6 +73,16 @@
         android:max="100"
         android:progress="50" />
 
+    <CheckBox
+        android:id="@+id/cb_wired_streaming"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="20dp"
+        android:buttonTint="#4FC3F7"
+        android:text="@string/settings_wired_label"
+        android:textColor="#E0E0E0"
+        android:textSize="15sp" />
+
     <!-- Buttons -->
     <LinearLayout
         style="?android:attr/buttonBarStyle"

@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
@@ -30,6 +31,7 @@ public class SettingsActivity extends Activity {
 
     private SeekBar mSbFov;
     private SeekBar mSbHeight;
+    private CheckBox mCbWiredStreaming;
     private TextView mTvFovValue;
     private TextView mTvHeightValue;
     private SharedPreferences mPrefs;
@@ -46,6 +48,7 @@ public class SettingsActivity extends Activity {
 
         mSbFov = findViewById(R.id.sb_fov);
         mSbHeight = findViewById(R.id.sb_height);
+        mCbWiredStreaming = findViewById(R.id.cb_wired_streaming);
         mTvFovValue = findViewById(R.id.tv_fov_value);
         mTvHeightValue = findViewById(R.id.tv_height_value);
         Button btnSave = findViewById(R.id.btn_save);
@@ -54,12 +57,14 @@ public class SettingsActivity extends Activity {
         // Load saved values
         float savedFov = mPrefs.getFloat("fov_h", FOV_DEFAULT);
         float savedHeight = mPrefs.getFloat("standing_height", HEIGHT_DEFAULT);
+        boolean wiredStreaming = mPrefs.getBoolean("wired_streaming", false);
 
         mSbFov.setMax((int)(FOV_MAX - FOV_MIN));
         mSbFov.setProgress((int)(savedFov - FOV_MIN));
 
         mSbHeight.setMax((int)((HEIGHT_MAX - HEIGHT_MIN) * 100));
         mSbHeight.setProgress((int)((savedHeight - HEIGHT_MIN) * 100));
+        mCbWiredStreaming.setChecked(wiredStreaming);
 
         updateFovLabel();
         updateHeightLabel();
@@ -81,13 +86,19 @@ public class SettingsActivity extends Activity {
             public void onClick(View v) {
                 float fovH = getFovValue();
                 float height = getHeightValue();
+                boolean wiredStreaming = mCbWiredStreaming.isChecked();
                 mPrefs.edit()
                     .putFloat("fov_h", fovH)
                     .putFloat("fov_v", fovH)  // square eye buffer: same h/v
                     .putFloat("standing_height", height)
-                    .apply();
+                    .putBoolean("wired_streaming", wiredStreaming)
+                    .commit();
                 // Launch VR activity
-                Intent intent = new Intent(SettingsActivity.this, PicoALVRActivity.class);
+                Class<?> activityClass = wiredStreaming
+                    ? PicoALVRWiredActivity.class
+                    : PicoALVRActivity.class;
+                Intent intent = new Intent(SettingsActivity.this, activityClass);
+                intent.putExtra("wired_streaming", wiredStreaming);
                 startActivity(intent);
                 finish();
             }
@@ -98,6 +109,7 @@ public class SettingsActivity extends Activity {
             public void onClick(View v) {
                 mSbFov.setProgress((int)(FOV_DEFAULT - FOV_MIN));
                 mSbHeight.setProgress((int)((HEIGHT_DEFAULT - HEIGHT_MIN) * 100));
+                mCbWiredStreaming.setChecked(false);
                 updateFovLabel();
                 updateHeightLabel();
             }
