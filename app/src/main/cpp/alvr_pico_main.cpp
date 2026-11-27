@@ -5,6 +5,7 @@
 #include <EGL/egl.h>
 #include <android/log.h>
 #include <jni.h>
+#include <algorithm>
 #include <cstring>
 #include <cmath>
 #include <vector>
@@ -180,6 +181,23 @@ struct RenderCtx {
 };
 static RenderCtx CTX;
 
+struct FoveationState {
+    std::mutex mtx;
+    bool enabled = false;
+    float viewSizeRatio[2] = {1.0f, 1.0f};
+    float edgeRatio[2] = {1.0f, 1.0f};
+    float c1[2] = {};
+    float c2[2] = {};
+    float loBound[2] = {};
+    float hiBound[2] = {};
+    float aLeft[2] = {};
+    float bLeft[2] = {};
+    float aRight[2] = {};
+    float bRight[2] = {};
+    float cRight[2] = {};
+};
+static FoveationState g_foveation;
+
 // ===== Utility =====
 static int64_t bootTimeNano() {
     struct timespec r = {};
@@ -204,8 +222,80 @@ static const char *VS =
 static const char *FS =
     "#version 300 es\n#extension GL_OES_EGL_image_external_essl3:enable\n"
     "precision highp float;\n"
-    "in vec2 vTC;\nuniform samplerExternalOES uTex;\nuniform float uEyeOffset;\nout vec4 o;\n"
-    "void main(){vec2 uv=vec2(vTC.x*0.5+uEyeOffset,1.0-vTC.y); o=texture(uTex,uv);}\n";
+    "in vec2 vTC;\nuniform samplerExternalOES uTex;\nuniform float uEyeOffset;\n"
+    "uniform int uFoveated; uniform int uRightEye;\n"
+    "uniform vec2 uViewSizeRatio; uniform vec2 uEdgeRatio;\n"
+    "uniform vec2 uC1; uniform vec2 uC2; uniform vec2 uLoBound; uniform vec2 uHiBound;\n"
+    "uniform vec2 uALeft; uniform vec2 uBLeft; uniform vec2 uARight;\n"
+    "uniform vec2 uBRight; uniform vec2 uCRight; out vec4 o;\n"
+    "void main(){ vec2 p=vec2(vTC.x,1.0-vTC.y); if(uFoveated!=0){ if(uRightEye!=0)p.x=1.0-p.x;\n"
+    "vec2 sourceCoord=p; vec2 center=(sourceCoord-uC1)*uEdgeRatio/uC2;\n"
+    "vec2 left=(-uBLeft+sqrt(max(uBLeft*uBLeft+4.0*uALeft*sourceCoord,vec2(0.0))))/(2.0*uALeft);\n"
+    "vec2 right=(-uBRight+sqrt(max(uBRight*uBRight-4.0*(uCRight-uARight*sourceCoord),vec2(0.0))))/(2.0*uARight);\n"
+    "p=center; p=mix(p,left,lessThan(sourceCoord,uLoBound));\n"
+    "p=mix(p,right,greaterThan(sourceCoord,uHiBound));\n"
+    "p*=uViewSizeRatio; if(uRightEye!=0)p.x=1.0-p.x; }\n"
+    "vec2 uv=vec2(p.x*0.5+uEyeOffset,p.y); o=texture(uTex,uv); }\n";
+
+static void updateFoveation(bool enabled, float centerSizeX, float centerSizeY,
+                            float centerShiftX, float centerShiftY,
+                            float edgeRatioX, float edgeRatioY,
+                            int viewWidth, int viewHeight) {
+    std::lock_guard<std::mutex> lock(g_foveation.mtx);
+    g_foveation.enabled = enabled && viewWidth > 0 && viewHeight > 0 &&
+                          edgeRatioX > 1.0f && edgeRatioY > 1.0f;
+    if (!g_foveation.enabled) return;
+
+    const float resolution[2] = {(float)viewWidth, (float)viewHeight};
+    const float centerSize[2] = {centerSizeX, centerSizeY};
+    const float centerShift[2] = {centerShiftX, centerShiftY};
+    const float edgeRatio[2] = {edgeRatioX, edgeRatioY};
+    float centerAligned[2];
+    float centerShiftAligned[2];
+    float lo[2], hi[2], c1[2], c2[2];
+    for (int axis = 0; axis < 2; ++axis) {
+        const float edgeSize = resolution[axis] * (1.0f - centerSize[axis]);
+        centerAligned[axis] = 1.0f - std::ceil(edgeSize / (edgeRatio[axis] * 2.0f)) *
+                                       (edgeRatio[axis] * 2.0f) / resolution[axis];
+        const float edgeSizeAligned = resolution[axis] * (1.0f - centerAligned[axis]);
+        centerShiftAligned[axis] = std::ceil(centerShift[axis] * edgeSizeAligned /
+                                             (edgeRatio[axis] * 2.0f)) *
+                                   (edgeRatio[axis] * 2.0f) / edgeSizeAligned;
+        const float optimizedResolution = resolution[axis] *
+                                          (centerAligned[axis] +
+                                           (1.0f - centerAligned[axis]) / edgeRatio[axis]);
+        const float alignedResolution = std::ceil(optimizedResolution / 32.0f) * 32.0f;
+        g_foveation.viewSizeRatio[axis] = optimizedResolution / alignedResolution;
+        g_foveation.edgeRatio[axis] = edgeRatio[axis];
+        const float c0 = (1.0f - centerAligned[axis]) * 0.5f;
+        const float c1Value = (edgeRatio[axis] - 1.0f) * c0 *
+                              (centerShiftAligned[axis] + 1.0f) / edgeRatio[axis];
+        const float c2Value = (edgeRatio[axis] - 1.0f) * centerAligned[axis] + 1.0f;
+        lo[axis] = c0 * (centerShiftAligned[axis] + 1.0f);
+        hi[axis] = c0 * (centerShiftAligned[axis] - 1.0f) + 1.0f;
+        const float loC = lo[axis] / c2Value;
+        const float hiC = hi[axis] / c2Value;
+        c1[axis] = c1Value;
+        c2[axis] = c2Value;
+        g_foveation.aLeft[axis] = c2Value * (1.0f - edgeRatio[axis]) /
+                                  (edgeRatio[axis] * loC);
+        g_foveation.bLeft[axis] = (c1Value + c2Value * loC) / loC;
+        g_foveation.aRight[axis] = c2Value * (edgeRatio[axis] - 1.0f) /
+                                   (edgeRatio[axis] * (1.0f - hiC));
+        g_foveation.bRight[axis] = (c2Value - edgeRatio[axis] * c1Value -
+                                    2.0f * edgeRatio[axis] * c2Value +
+                                    c2Value * edgeRatio[axis] * (1.0f - hiC) +
+                                    edgeRatio[axis]) /
+                                   (edgeRatio[axis] * (1.0f - hiC));
+        g_foveation.cRight[axis] = (c2Value * edgeRatio[axis] - c2Value) *
+                                   (c1Value - hiC + c2Value * hiC) /
+                                   (edgeRatio[axis] * (1.0f - hiC) * (1.0f - hiC));
+    }
+    std::copy(c1, c1 + 2, g_foveation.c1);
+    std::copy(c2, c2 + 2, g_foveation.c2);
+    std::copy(lo, lo + 2, g_foveation.loBound);
+    std::copy(hi, hi + 2, g_foveation.hiBound);
+}
 
 static GLuint mkShader(GLenum t, const char* s) {
     GLuint sh = glCreateShader(t);
@@ -245,6 +335,38 @@ static void blitExtTex(GLuint tex, int eye) {
     glUniform1i(glGetUniformLocation(CTX.blitProgram, "uTex"), 0);
     // Left eye: offset=0.0 (samples U=[0, 0.5]), Right eye: offset=0.5 (samples U=[0.5, 1.0])
     glUniform1f(glGetUniformLocation(CTX.blitProgram, "uEyeOffset"), eye == 0 ? 0.0f : 0.5f);
+    FoveationState foveation;
+    {
+        std::lock_guard<std::mutex> lock(g_foveation.mtx);
+        foveation.enabled = g_foveation.enabled;
+        std::copy(g_foveation.viewSizeRatio, g_foveation.viewSizeRatio + 2, foveation.viewSizeRatio);
+        std::copy(g_foveation.edgeRatio, g_foveation.edgeRatio + 2, foveation.edgeRatio);
+        std::copy(g_foveation.c1, g_foveation.c1 + 2, foveation.c1);
+        std::copy(g_foveation.c2, g_foveation.c2 + 2, foveation.c2);
+        std::copy(g_foveation.loBound, g_foveation.loBound + 2, foveation.loBound);
+        std::copy(g_foveation.hiBound, g_foveation.hiBound + 2, foveation.hiBound);
+        std::copy(g_foveation.aLeft, g_foveation.aLeft + 2, foveation.aLeft);
+        std::copy(g_foveation.bLeft, g_foveation.bLeft + 2, foveation.bLeft);
+        std::copy(g_foveation.aRight, g_foveation.aRight + 2, foveation.aRight);
+        std::copy(g_foveation.bRight, g_foveation.bRight + 2, foveation.bRight);
+        std::copy(g_foveation.cRight, g_foveation.cRight + 2, foveation.cRight);
+    }
+    glUniform1i(glGetUniformLocation(CTX.blitProgram, "uFoveated"), foveation.enabled ? 1 : 0);
+    glUniform1i(glGetUniformLocation(CTX.blitProgram, "uRightEye"), eye == 1 ? 1 : 0);
+    const auto setVec2 = [&](const char* name, const float* value) {
+        glUniform2fv(glGetUniformLocation(CTX.blitProgram, name), 1, value);
+    };
+    setVec2("uViewSizeRatio", foveation.viewSizeRatio);
+    setVec2("uEdgeRatio", foveation.edgeRatio);
+    setVec2("uC1", foveation.c1);
+    setVec2("uC2", foveation.c2);
+    setVec2("uLoBound", foveation.loBound);
+    setVec2("uHiBound", foveation.hiBound);
+    setVec2("uALeft", foveation.aLeft);
+    setVec2("uBLeft", foveation.bLeft);
+    setVec2("uARight", foveation.aRight);
+    setVec2("uBRight", foveation.bRight);
+    setVec2("uCRight", foveation.cRight);
     glBindVertexArray(CTX.blitVao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
@@ -531,6 +653,16 @@ static void alvrThreadLoop() {
                     LOGI("Streaming started: ALVR frame %dx%d (aspect=%.3f) vs PicoVR eye buffer %dx%d (aspect=%.3f)",
                          d.view_width, d.view_height, (float)d.view_width / (float)d.view_height,
                          CTX.viewWidth, CTX.viewHeight, CTX.viewHeight > 0 ? (float)CTX.viewWidth / (float)CTX.viewHeight : 0.0f);
+                    updateFoveation(d.enable_foveated_encoding,
+                                    d.foveation_center_size_x, d.foveation_center_size_y,
+                                    d.foveation_center_shift_x, d.foveation_center_shift_y,
+                                    d.foveation_edge_ratio_x, d.foveation_edge_ratio_y,
+                                    (int)d.view_width, (int)d.view_height);
+                    LOGI("Foveated encoding: enabled=%d center=%.2fx%.2f shift=%.2fx%.2f edge=%.2fx%.2f",
+                         (int)d.enable_foveated_encoding, d.foveation_center_size_x,
+                         d.foveation_center_size_y, d.foveation_center_shift_x,
+                         d.foveation_center_shift_y, d.foveation_edge_ratio_x,
+                         d.foveation_edge_ratio_y);
                     {
                         std::lock_guard<std::mutex> lk(g_stream.mtx);
                         g_stream.startPending = true;
@@ -546,6 +678,7 @@ static void alvrThreadLoop() {
                 }
                 case ALVR_EVENT_STREAMING_STOPPED:
                     LOGI("Streaming stopped");
+                    updateFoveation(false, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0, 0);
                     // Do not let a frame owned by the old decoder survive a
                     // disconnect/reconnect cycle.
                     {
@@ -646,10 +779,8 @@ Java_top_playtbsxys_picostreamer_PicoALVRActivity_initializeNative(JNIEnv *env, 
     caps.default_view_height = 1920;
     caps.refresh_rates = rr;
     caps.refresh_rates_count = 1;
-    // Foveated encoding (FFR) disabled: our blit shader does not implement FFR unpacking.
-    // The ALVR OpenXR client uses a StagingRenderer with a complex shader to unpack
-    // FFR-compressed frames. Without it, edges look blocky/mosaic-like.
-    caps.foveated_encoding = false;
+    // The render shader reverses ALVR's fixed foveated-encoding warp.
+    caps.foveated_encoding = true;
     caps.encoder_high_profile = true;
     caps.prefer_full_range = true;
     caps.preferred_encoding_gamma = 1.0f;

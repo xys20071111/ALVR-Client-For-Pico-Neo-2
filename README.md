@@ -12,6 +12,8 @@ PicoStreamer 是一个基于 [ALVR](https://github.com/alvr-org/ALVR) 的 VR 串
 - **PicoVR Native SDK**：负责头显渲染（VRActivity）、头部追踪（HmdState）、手柄输入（CVControllerManager）、6DoF 追踪（PvrClient）
 - **C++ 桥接层**（`alvr_pico_main.cpp`）：连接 ALVR client_core 与 PicoVR SDK，处理 OpenGL ES 纹理渲染、追踪数据转发、手柄按钮映射
 
+客户端支持 ALVR 固定中心 FFR（由 ALVR Server 的视频设置控制），并在头显端还原压缩后的画面区域。Pico Neo 2 没有眼动追踪传感器，因此此版本不会随眼球注视方向动态移动高画质区域。
+
 ### 目标设备
 
 | 参数 | 值 |
