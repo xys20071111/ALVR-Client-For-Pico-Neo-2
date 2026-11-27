@@ -30,8 +30,8 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
     }
 
     private CVControllerManager mControllerManager;
-    private CVController mLeftController;
-    private CVController mRightController;
+    private volatile CVController mLeftController;
+    private volatile CVController mRightController;
 
     // Pico Home key (key code 1001) state, tracked via dispatchKeyEvent override
     private static boolean sHomeKeyDown = false;
@@ -56,6 +56,7 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
     }
 
     private void setupControllers() {
+        if (mControllerManager == null) return;
         mLeftController = mControllerManager.getLeftController();
         mRightController = mControllerManager.getRightController();
         // Disable Pico system Home key intercept so it reaches SteamVR via ALVR
@@ -68,10 +69,38 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
             + " HomeKey intercept disabled");
     }
 
+    // The Pico service can replace controller proxy objects after a radio or
+    // service reconnect without producing a reliable state callback. Refresh
+    // only disconnected/missing proxies; connected controllers keep the fast
+    // path used by the render callback.
+    private void refreshDisconnectedControllers() {
+        if (mControllerManager == null) return;
+        if (mLeftController == null || mLeftController.getConnectState() != 1) {
+            CVController latest = mControllerManager.getLeftController();
+            if (latest != null && latest != mLeftController) {
+                mLeftController = latest;
+                mLeftController.CVControllerSetIsEnbleHomeKey(false);
+                Log.i(TAG, "Refreshed left controller proxy (conn=" + latest.getConnectState() + ")");
+            }
+        }
+        if (mRightController == null || mRightController.getConnectState() != 1) {
+            CVController latest = mControllerManager.getRightController();
+            if (latest != null && latest != mRightController) {
+                mRightController = latest;
+                mRightController.CVControllerSetIsEnbleHomeKey(false);
+                Log.i(TAG, "Refreshed right controller proxy (conn=" + latest.getConnectState() + ")");
+            }
+        }
+    }
+
     private final CVControllerListener mControllerListener = new CVControllerListener() {
         @Override
         public void onBindSuccess() {
             Log.i(TAG, "Controller service bound");
+            // A SteamVR restart may cause the Pico service to be rebound while
+            // the Activity instance survives. Refresh proxy objects as soon as
+            // the service is available instead of relying only on onThreadStart.
+            setupControllers();
         }
 
         @Override
@@ -139,6 +168,10 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
 
     @Override
     protected void onPause() {
+        // Never keep proxies from a controller-service connection that is
+        // about to be unbound. The next bind callback will fetch fresh ones.
+        mLeftController = null;
+        mRightController = null;
         mControllerManager.unbindService();
         if (mPvrClient != null) mPvrClient.onPause();
         pauseNative();
@@ -168,6 +201,7 @@ public class PicoALVRActivity extends VRActivity implements RenderInterface {
 
     @Override
     public void onFrameBegin(HmdState hmdState) {
+        refreshDisconnectedControllers();
         // Get HMD orientation and position
         float[] hmdOrientation = new float[4];
         float[] hmdPosition = new float[3];

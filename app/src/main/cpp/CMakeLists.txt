@@ -6,7 +6,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
 
 # ALVR client_core build output directory
 # The header (alvr_client_core.h) and .so files are generated here by cargo xtask
-set(ALVR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../ALVR")
+set(ALVR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../ALVR")
 set(ALVR_BUILD_DIR "${ALVR_ROOT}/build/alvr_client_core")
 
 # Main native library

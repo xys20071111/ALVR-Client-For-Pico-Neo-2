@@ -51,7 +51,7 @@ android {
     sourceSets {
         getByName("main") {
             // ALVR client_core shared libraries built by cargo xtask
-            val alvrBuildDir = file("${rootDir}/../ALVR/build/alvr_client_core")
+            val alvrBuildDir = file("${rootDir}/ALVR/build/alvr_client_core")
             jniLibs.srcDirs(alvrBuildDir)
         }
     }
@@ -72,7 +72,7 @@ dependencies {
 // Task to build ALVR client_core library via cargo xtask
 // Set ANDROID_NDK_HOME environment variable before building, or cargo will use its own NDK discovery.
 tasks.register<Exec>("buildAlvrClientLib") {
-    workingDir = file("${rootDir}/../ALVR")
+    workingDir = file("${rootDir}/ALVR")
     System.getenv("ANDROID_NDK_HOME")?.let {
         environment("ANDROID_NDK_HOME", it)
     }

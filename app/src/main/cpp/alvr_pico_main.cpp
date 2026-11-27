@@ -364,6 +364,8 @@ static void sendViewParams() {
 // Send tracking from shared data (called on ALVR thread)
 static bool g_leftProfileSent = false;
 static bool g_rightProfileSent = false;
+static std::chrono::steady_clock::time_point g_leftProfileLastSent{};
+static std::chrono::steady_clock::time_point g_rightProfileLastSent{};
 
 static void sendTracking() {
     TrackSnap t = {};
@@ -414,7 +416,10 @@ static void sendTracking() {
     static std::atomic<int> g_trackCount{0};
     int tn = ++g_trackCount;
     if (tn % 200 == 1) {
-        LOGI("sendTracking: n=%d left=%d right=%d", tn, (int)t.leftConn, (int)t.rightConn);
+        LOGI("sendTracking: n=%d motionCount=%zu left=%d(id=%llu) right=%d(id=%llu)",
+             tn, motions.size(), (int)t.leftConn,
+             (unsigned long long)LEFT_HAND_ID, (int)t.rightConn,
+             (unsigned long long)RIGHT_HAND_ID);
         LOGI("  hmdOri=(%.2f,%.2f,%.2f,%.2f) hmdPos=(%.3f,%.3f,%.3f)",
              t.hmdOri.x, t.hmdOri.y, t.hmdOri.z, t.hmdOri.w,
              t.hmdPos[0], t.hmdPos[1], t.hmdPos[2]);
@@ -433,11 +438,14 @@ static void sendTracking() {
                  t.rightPos[0], t.rightPos[1], t.rightPos[2]);
         }
     }
+    const auto profileNow = std::chrono::steady_clock::now();
     if (t.leftConn) {
-        if (!g_leftProfileSent) {
+        if (!g_leftProfileSent
+            || profileNow - g_leftProfileLastSent >= std::chrono::seconds(1)) {
             alvr_send_active_interaction_profile(LEFT_HAND_ID, PICO_NEO3_PROFILE_ID);
-            LOGI("Sent left interaction profile");
+            LOGI("Sent left interaction profile (refresh)");
             g_leftProfileSent = true;
+            g_leftProfileLastSent = profileNow;
         }
         alvr_send_battery(LEFT_HAND_ID, t.leftBattery / 100.0f, false);
         sendButtons(true, t);
@@ -445,10 +453,12 @@ static void sendTracking() {
         g_leftProfileSent = false;
     }
     if (t.rightConn) {
-        if (!g_rightProfileSent) {
+        if (!g_rightProfileSent
+            || profileNow - g_rightProfileLastSent >= std::chrono::seconds(1)) {
             alvr_send_active_interaction_profile(RIGHT_HAND_ID, PICO_NEO3_PROFILE_ID);
-            LOGI("Sent right interaction profile");
+            LOGI("Sent right interaction profile (refresh)");
             g_rightProfileSent = true;
+            g_rightProfileLastSent = profileNow;
         }
         alvr_send_battery(RIGHT_HAND_ID, t.rightBattery / 100.0f, false);
         sendButtons(false, t);
@@ -458,7 +468,7 @@ static void sendTracking() {
 }
 
 // Track decoder state to avoid recreating identical decoders
-static AlvrCodec g_lastCodec = (AlvrCodec)999; // sentinel value meaning "none"
+static int g_lastCodec = -1; // sentinel value meaning "none"
 static std::vector<uint8_t> g_lastConfigNal;
 static bool g_decoderCreated = false;
 
@@ -489,7 +499,10 @@ static void createDecoder(AlvrCodec codec) {
     AlvrDecoderConfig dc = {};
     dc.codec = codec;
     dc.force_software_decoder = false;
-    dc.max_buffering_frames = 3.0f;
+    // Keep the decoder queue near ALVR's default two-frame target. This avoids
+    // the extra latency of three queued frames without making UDP jitter as
+    // likely to underflow the decoder output queue as a one-frame target.
+    dc.max_buffering_frames = 2.0f;
     dc.buffering_history_weight = 0.8f;
     dc.config_buffer = buf.data();
     dc.config_buffer_size = sz;
@@ -514,7 +527,7 @@ static void alvrThreadLoop() {
         while (alvr_poll_event(&ev)) {
             switch (ev.tag) {
                 case ALVR_EVENT_STREAMING_STARTED: {
-                    auto& d = ev.data.streaming_started;
+                    auto& d = ev.STREAMING_STARTED;
                     LOGI("Streaming started: ALVR frame %dx%d (aspect=%.3f) vs PicoVR eye buffer %dx%d (aspect=%.3f)",
                          d.view_width, d.view_height, (float)d.view_width / (float)d.view_height,
                          CTX.viewWidth, CTX.viewHeight, CTX.viewHeight > 0 ? (float)CTX.viewWidth / (float)CTX.viewHeight : 0.0f);
@@ -533,11 +546,20 @@ static void alvrThreadLoop() {
                 }
                 case ALVR_EVENT_STREAMING_STOPPED:
                     LOGI("Streaming stopped");
+                    // Do not let a frame owned by the old decoder survive a
+                    // disconnect/reconnect cycle.
+                    {
+                        std::lock_guard<std::mutex> lk(g_frame.mtx);
+                        g_frame.hasNewFrame = false;
+                        g_frame.hardwareBuffer = nullptr;
+                        g_frame.timestampNs = 0;
+                        g_frame.consumed.store(true);
+                    }
                     // Destroy decoder on stream stop
                     if (g_decoderCreated) {
                         alvr_destroy_decoder();
                         g_decoderCreated = false;
-                        g_lastCodec = (AlvrCodec)999;
+                        g_lastCodec = -1;
                         g_lastConfigNal.clear();
                     }
                     // Reset profile flags for next connection
@@ -550,12 +572,12 @@ static void alvrThreadLoop() {
                     }
                     break;
                 case ALVR_EVENT_DECODER_CONFIG:
-                    createDecoder(ev.data.decoder_config.codec);
+                    createDecoder(ev.DECODER_CONFIG.codec);
                     break;
                 case ALVR_EVENT_HUD_MESSAGE_UPDATED:
                     break;
                 case ALVR_EVENT_HAPTICS:
-                    LOGD("Haptics: %lu", (unsigned long)ev.data.haptics.device_id);
+                    LOGD("Haptics: %lu", (unsigned long)ev.HAPTICS.device_id);
                     break;
                 default: break;
             }
@@ -579,7 +601,10 @@ static void alvrThreadLoop() {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        // The render callback runs at 72 Hz. A 5 ms polling sleep can add
+        // several milliseconds to frame and event handling, so keep polling
+        // responsive without busy-spinning.
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     // Cleanup ALVR OpenGL on this thread
@@ -778,9 +803,12 @@ Java_top_playtbsxys_picostreamer_PicoALVRActivity_onFrameBeginNative(
             CTX.curBuf = buf;
             CTX.hasFrame = true;
             CTX.newFrameThisRender = true;
-            LOGI("New frame: ts=%llu buf=%p", (unsigned long long)ts, buf);
-            AlvrViewParams vp[2] = {};
-            alvr_report_compositor_start(ts, vp);
+            static std::atomic<int> frameLogCount{0};
+            if (++frameLogCount % 300 == 1) {
+                LOGD("New frame: ts=%llu buf=%p", (unsigned long long)ts, buf);
+            }
+            AlvrViewParams viewParams[2] = {};
+            alvr_report_compositor_start(ts, viewParams);
             assocHWB(buf, CTX.streamTex);
         }
     }
